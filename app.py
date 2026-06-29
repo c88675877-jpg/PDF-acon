@@ -26,7 +26,6 @@ from analyzer import analyze_pdf_structure
 # ---------- 常量 ----------
 
 DEFAULT_MAX_PAGES = 50
-MAX_FILE_SIZE_MB = 100
 CLEANUP_INTERVAL_SECONDS = 300  # 每5分钟清理一次临时文件
 
 # ---------- 临时文件管理 ----------
@@ -177,12 +176,6 @@ footer { display: none !important; }
 
 with gr.Blocks(
     title="PDF 智能目录生成器",
-    theme=gr.themes.Soft(
-        primary_hue="blue",
-        neutral_hue="slate",
-        font=gr.themes.GoogleFont("Noto Sans SC"),
-    ),
-    css=CSS,
 ) as demo:
 
     # ---- 头部 ----
@@ -206,7 +199,6 @@ with gr.Blocks(
                 label="选择 PDF 文件",
                 file_types=[".pdf"],
                 file_count="single",
-                size_limit=f"{MAX_FILE_SIZE_MB}MB",
                 scale=1,
             )
 
@@ -292,4 +284,10 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=7860,
         show_error=True,
+        theme=gr.themes.Soft(
+            primary_hue="blue",
+            neutral_hue="slate",
+            font=gr.themes.GoogleFont("Noto Sans SC"),
+        ),
+        css=CSS,
     )
