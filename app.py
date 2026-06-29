@@ -33,6 +33,21 @@ CLEANUP_INTERVAL_SECONDS = 300  # 每5分钟清理一次临时文件
 _temp_dir = tempfile.mkdtemp(prefix="pdf_toc_")
 
 
+def _get_file_path(file_obj) -> str | None:
+    """兼容 Gradio 5.x 和 6.x 的文件路径提取"""
+    if file_obj is None:
+        return None
+    if isinstance(file_obj, str):
+        return file_obj
+    # Gradio 6.x: FileData 对象用 .path
+    if hasattr(file_obj, "path"):
+        return file_obj.path
+    # Gradio 5.x: 旧版本用 .name
+    if hasattr(file_obj, "name"):
+        return file_obj.name
+    return None
+
+
 def _safe_path(original_name: str) -> str:
     """生成安全的输出文件路径"""
     base = os.path.splitext(os.path.basename(original_name))[0]
@@ -62,7 +77,13 @@ def process_pdf(
     if not api_key or not api_key.startswith("sk-"):
         return None, "❌ 请输入有效的 DeepSeek API Key（以 sk- 开头）"
 
-    input_path = pdf_file.name
+    input_path = _get_file_path(pdf_file)
+    if not input_path:
+        return None, "❌ 无法读取上传的文件"
+
+    # 检查文件是否存在
+    if not os.path.isfile(input_path):
+        return None, f"❌ 找不到上传的文件: {input_path}"
 
     try:
         # --- 获取 PDF 信息 ---
