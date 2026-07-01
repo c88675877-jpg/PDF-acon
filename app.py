@@ -37,12 +37,14 @@ def _get_file_path(file_obj) -> str | None:
     """兼容 Gradio 5.x 和 6.x 的文件路径提取"""
     if file_obj is None:
         return None
+    # 字符串直接返回
     if isinstance(file_obj, str):
-        return file_obj
-    # Gradio 6.x: FileData 对象用 .path
+        file_obj = file_obj.strip()
+        return file_obj if file_obj else None
+    # FileData 对象（Gradio 6.x）
     if hasattr(file_obj, "path"):
         return file_obj.path
-    # Gradio 5.x: 旧版本用 .name
+    # 旧版本 Gradio 的 .name
     if hasattr(file_obj, "name"):
         return file_obj.name
     return None
@@ -58,7 +60,7 @@ def _safe_path(original_name: str) -> str:
 # ---------- 核心处理函数 ----------
 
 def process_pdf(
-    pdf_file: gr.File,
+    pdf_file,
     api_key: str,
     max_pages: int,
     progress: gr.Progress = gr.Progress(),
@@ -79,11 +81,15 @@ def process_pdf(
 
     input_path = _get_file_path(pdf_file)
     if not input_path:
-        return None, "❌ 无法读取上传的文件"
+        return None, "❌ 无法读取上传的文件，请重新选择文件"
 
     # 检查文件是否存在
     if not os.path.isfile(input_path):
-        return None, f"❌ 找不到上传的文件: {input_path}"
+        return None, (
+            f"❌ 找不到上传的文件\n\n"
+            f"路径: {input_path}\n"
+            f"请重新上传文件后重试"
+        )
 
     try:
         # --- 获取 PDF 信息 ---
