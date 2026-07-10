@@ -28,6 +28,7 @@ from analyzer import analyze_pdf_structure
 
 DEFAULT_MAX_PAGES = 50
 CLEANUP_INTERVAL_SECONDS = 300  # 每5分钟清理一次临时文件
+ENV_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")  # 从环境变量读取 API Key
 
 # ---------- 临时文件管理 ----------
 
@@ -117,8 +118,17 @@ def process_pdf(
     # --- 验证输入 ---
     if pdf_file is None:
         return None, "❌ 请先上传一个 PDF 文件"
+
+    # 如果用户没填 Key，则尝试使用环境变量中的 Key
     if not api_key or not api_key.startswith("sk-"):
-        return None, "❌ 请输入有效的 DeepSeek API Key（以 sk- 开头）"
+        api_key = ENV_API_KEY
+
+    if not api_key or not api_key.startswith("sk-"):
+        return None, (
+            "❌ 未检测到 DeepSeek API Key。\n\n"
+            "请在输入框中填写您的 API Key，"
+            "或在部署环境中设置 DEEPSEEK_API_KEY 环境变量。"
+        )
 
     input_path = _get_file_path(pdf_file)
     if not input_path:
@@ -269,10 +279,10 @@ with gr.Blocks(
             )
 
             api_key_input = gr.Textbox(
-                label="DeepSeek API Key",
+                label="DeepSeek API Key（可选）",
                 placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                 type="password",
-                info="用于调用 DeepSeek API 分析文档结构，不会保存",
+                info="如已配置环境变量 DEEPSEEK_API_KEY 则可不填",
             )
 
             max_pages = gr.Slider(
@@ -295,9 +305,10 @@ with gr.Blocks(
                     """
                     ### 使用方法
                     1. **获取 API Key**：在 [DeepSeek 官网](https://platform.deepseek.com/) 注册并创建 API Key
-                    2. **上传 PDF**：选择你要处理的 PDF 文件（最大 100MB）
-                    3. **点击处理**：等待 AI 分析完成（约 30 秒 - 2 分钟）
-                    4. **下载结果**：获取带可点击书签的 PDF
+                    2. **配置 Key**：在输入框中填写，或设置环境变量 `DEEPSEEK_API_KEY`（部署后只需配一次）
+                    3. **上传 PDF**：选择你要处理的 PDF 文件（最大 100MB）
+                    4. **点击处理**：等待 AI 分析完成（约 30 秒 - 2 分钟）
+                    5. **下载结果**：获取带可点击书签的 PDF
 
                     ### 费用参考
                     DeepSeek API 极其便宜：处理一本 300 页的书约 ¥0.01-0.03
