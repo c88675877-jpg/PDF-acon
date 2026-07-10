@@ -146,21 +146,25 @@ def process_pdf(
                 f"如需重新生成，请先移除原有书签。"
             )
 
-        # --- 提取文本 ---
-        progress(0.1, desc=f"📝 提取前 {actual_pages} 页文本...")
-        pages = extract_text_by_page(input_path, max_pages=actual_pages)
-
-        # 检查是否为扫描件
-        is_scanned = estimate_is_scanned(pages)
+        # --- 快速检查是否为扫描件（只检查前 2 页） ---
+        progress(0.1, desc="🔍 检测 PDF 类型...")
+        sample = extract_text_by_page(input_path, max_pages=2)
+        is_scanned = estimate_is_scanned(sample)
 
         if is_scanned:
-            progress(0.2, desc="🖼️ 检测为扫描件，使用 MiMo 视觉 AI 分析...")
+            # 扫描件 → 直接视觉分析，跳过逐页提文本（省时间）
+            vision_max = min(actual_pages, 10)  # 最多看 10 页，目录通常在前几页
+            progress(0.15, desc=f"🖼️ 扫描件模式，分析前 {vision_max} 页图片...")
             result = analyze_pdf_vision(
                 input_path,
                 api_key,
-                max_pages=actual_pages,
+                max_pages=vision_max,
             )
         else:
+            # 有文字的 PDF → 提取文本分析
+            progress(0.2, desc=f"📝 提取前 {actual_pages} 页文本...")
+            pages = extract_text_by_page(input_path, max_pages=actual_pages)
+
             total_chars = sum(p["char_count"] for p in pages)
             if total_chars < 100:
                 return None, (
@@ -168,8 +172,7 @@ def process_pdf(
                     "💡 这可能是扫描件或加密文档。"
                 )
 
-            # --- MiMo API 分析 ---
-            progress(0.3, desc="🤖 正在调用 MiMo API 分析文档结构...")
+            progress(0.35, desc="🤖 正在调用 MiMo API 分析文档结构...")
             result = analyze_pdf_structure(pages, api_key)
 
         toc = result.get("toc", [])

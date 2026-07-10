@@ -245,7 +245,7 @@ VISION_PROMPT = """你是一个专业的PDF文档结构分析助手。
 def analyze_pdf_vision(
     pdf_path: str,
     api_key: str,
-    max_pages: int = 15,
+    max_pages: int = 10,
     max_retries: int = 3,
 ) -> dict:
     """
@@ -272,11 +272,11 @@ def analyze_pdf_vision(
     )
 
     # 渐进式页数：如果一次请求失败，逐步减少页数重试
-    page_budgets = [max_pages, 10, 5]
+    page_budgets = [max_pages, 8, 5]
 
     for budget_idx, budget in enumerate(page_budgets):
-        # 将 PDF 页面渲染为 base64 图片
-        pages = render_pdf_pages_base64(pdf_path, max_pages=budget, max_width=500)
+        # 将 PDF 页面渲染为 base64 图片（低分辨率加快速度）
+        pages = render_pdf_pages_base64(pdf_path, max_pages=budget, max_width=400)
 
         if not pages:
             raise ValueError("无法读取 PDF 页面")
