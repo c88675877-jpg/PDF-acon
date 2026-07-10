@@ -4,6 +4,7 @@ PDF 目录处理核心模块
 使用 PyMuPDF (fitz) 提取 PDF 文本、读写书签（outlines）。
 """
 
+import base64
 import fitz
 from typing import Optional
 
@@ -114,3 +115,37 @@ def estimate_is_scanned(pages: list[dict], threshold: float = 0.1) -> bool:
         return True
     empty_count = sum(1 for p in pages if p["char_count"] < 20)
     return (empty_count / len(pages)) > threshold
+
+
+# ---------- 扫描件支持：PDF 页面渲染为图片 ----------
+
+
+def pdf_page_to_base64(pdf_path: str, page_index: int, max_width: int = 800) -> str:
+    """将 PDF 单页渲染为 base64 JPEG 图片"""
+    doc = fitz.open(pdf_path)
+    page = doc[page_index]
+    zoom = max_width / page.rect.width
+    matrix = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=matrix)
+    img_bytes = pix.tobytes("jpeg", quality=85)
+    doc.close()
+    return base64.b64encode(img_bytes).decode("utf-8")
+
+
+def render_pdf_pages_base64(pdf_path: str, max_pages: int = 50, max_width: int = 800) -> list[dict]:
+    """将 PDF 前 N 页逐页渲染为 base64 图片列表"""
+    doc = fitz.open(pdf_path)
+    total = min(len(doc), max_pages)
+    pages = []
+    for i in range(total):
+        zoom = max_width / doc[i].rect.width
+        matrix = fitz.Matrix(zoom, zoom)
+        pix = doc[i].get_pixmap(matrix=matrix)
+        img_bytes = pix.tobytes("jpeg", quality=85)
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        pages.append({
+            "page_num": i + 1,
+            "image_base64": b64,
+        })
+    doc.close()
+    return pages

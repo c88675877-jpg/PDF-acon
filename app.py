@@ -22,13 +22,13 @@ from pdf_toc import (
     get_pdf_info,
     estimate_is_scanned,
 )
-from analyzer import analyze_pdf_structure
+from analyzer import analyze_pdf_structure, analyze_pdf_vision
 
 # ---------- 常量 ----------
 
 DEFAULT_MAX_PAGES = 50
 CLEANUP_INTERVAL_SECONDS = 300  # 每5分钟清理一次临时文件
-API_KEY = "sk-de53cc00b2f34e27a9372d6618fdc073"  # DeepSeek API Key
+API_KEY = "sk-cz1g01ope3vfsfmzjaejofyyqa3lq4m9elam7w97o9d47t6j"  # MiMo API Key
 
 # ---------- 临时文件管理 ----------
 
@@ -151,23 +151,26 @@ def process_pdf(
         pages = extract_text_by_page(input_path, max_pages=actual_pages)
 
         # 检查是否为扫描件
-        if estimate_is_scanned(pages):
-            return None, (
-                "❌ 该 PDF 似乎是扫描件（图片型），没有可提取的文本内容。\n\n"
-                "💡 建议先用 OCR 工具（如 Adobe Acrobat、PaddleOCR）将扫描件转换为"
-                "可搜索的 PDF 后再处理。"
-            )
+        is_scanned = estimate_is_scanned(pages)
 
-        total_chars = sum(p["char_count"] for p in pages)
-        if total_chars < 100:
-            return None, (
-                "❌ PDF 中提取的文本太少（不足100字符），无法分析文档结构。\n\n"
-                "💡 这可能是扫描件或加密文档。"
+        if is_scanned:
+            progress(0.2, desc="🖼️ 检测为扫描件，使用 MiMo 视觉 AI 分析...")
+            result = analyze_pdf_vision(
+                input_path,
+                api_key,
+                max_pages=actual_pages,
             )
+        else:
+            total_chars = sum(p["char_count"] for p in pages)
+            if total_chars < 100:
+                return None, (
+                    "❌ PDF 中提取的文本太少（不足100字符），无法分析文档结构。\n\n"
+                    "💡 这可能是扫描件或加密文档。"
+                )
 
-        # --- DeepSeek API 分析 ---
-        progress(0.3, desc="🤖 正在调用 DeepSeek API 分析文档结构...")
-        result = analyze_pdf_structure(pages, api_key)
+            # --- MiMo API 分析 ---
+            progress(0.3, desc="🤖 正在调用 MiMo API 分析文档结构...")
+            result = analyze_pdf_structure(pages, api_key)
 
         toc = result.get("toc", [])
         doc_title = result.get("title", "未命名文档")
