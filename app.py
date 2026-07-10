@@ -142,6 +142,7 @@ def process_pdf(
             existing = verify_toc(input_path)
             return None, (
                 f"📌 该 PDF 已有 {len(existing)} 个书签，无需再次生成。\n\n"
+                f"如需重新生成，请先移除原有书签。"
             )
 
         # --- 提取文本 ---
