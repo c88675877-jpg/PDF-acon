@@ -186,36 +186,6 @@ def create_fallback_toc(pages_text: list[dict]) -> dict:
 
 # ---------- 扫描件支持：视觉分析 ----------
 
-import re
-
-
-def _extract_json(text: str) -> dict:
-    """从 API 返回文本中健壮地提取 JSON，兼容各种包装格式"""
-    # 尝试直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试提取 ```json ... ``` 代码块
-    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
-
-    # 尝试提取第一个 { ... } JSON 对象
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-
-    raise json.JSONDecodeError(f"无法从响应中提取 JSON。响应内容（前 300 字符）: {text[:300]}", text, 0)
-
-
 VISION_PROMPT = """你是一个专业的PDF文档结构分析助手。
 
 我会依次发送PDF每一页的截图图片（按页码顺序排列，每张图片前标注了页码）。
@@ -250,13 +220,12 @@ def analyze_pdf_vision(
 ) -> dict:
     """
     使用 MiMo 视觉 API 分析扫描件 PDF 结构，提取目录。
-    采用渐进式策略：如果请求过大导致失败，自动减少页数重试。
 
     参数:
         pdf_path: PDF 文件路径
         api_key: MiMo API Key
         max_pages: 最多分析页数
-        max_retries: 每批次的 API 重试次数
+        max_retries: 重试次数
 
     返回:
         {"title": str, "toc": [{"level": int, "title": str, "page": int}, ...]}
@@ -278,70 +247,63 @@ def analyze_pdf_vision(
         # 将 PDF 页面渲染为 base64 图片（低分辨率加快速度）
         pages = render_pdf_pages_base64(pdf_path, max_pages=budget, max_width=400)
 
-        if not pages:
-            raise ValueError("无法读取 PDF 页面")
+    if not pages:
+        raise ValueError("无法读取 PDF 页面")
 
-        # 构建消息：文本指令 + 每页图片
-        content = [{"type": "text", "text": VISION_PROMPT}]
-        for p in pages:
-            content.append({"type": "text", "text": f"\n--- Page {p['page_num']} ---"})
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{p['image_base64']}",
-                    "detail": "low",
-                },
-            })
+    # 构建消息：文本指令 + 每页图片
+    content = [{"type": "text", "text": VISION_PROMPT}]
+    for p in pages:
+        content.append({"type": "text", "text": f"\n--- Page {p['page_num']} ---"})
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{p['image_base64']}",
+                "detail": "low",
+            },
+        })
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                response = client.chat.completions.create(
-                    model=MIMO_VISION_MODEL,
-                    messages=[{"role": "user", "content": content}],
-                    temperature=0.1,
-                    max_tokens=4096,
-                    timeout=120,
-                )
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model=MIMO_VISION_MODEL,
+                messages=[{"role": "user", "content": content}],
+                temperature=0.1,
+                max_tokens=4096,
+            )
 
-                result_text = response.choices[0].message.content
-                if not result_text:
-                    raise ValueError("API 返回内容为空")
+            result_text = response.choices[0].message.content
+            if not result_text:
+                raise ValueError("API 返回内容为空")
 
-                # 兼容 JSON 被 markdown 代码块包裹的情况
-                result = _extract_json(result_text)
+            result = json.loads(result_text)
 
-                # 验证并清理 toc 数据
-                valid_toc = validate_toc_data(result)
-                if valid_toc:
-                    return {
-                        "title": result.get("title", "未命名文档"),
-                        "toc": valid_toc,
-                        "raw_count": len(result.get("toc", [])),
-                        "valid_count": len(valid_toc),
-                    }
-                elif attempt < max_retries:
-                    continue
-                else:
-                    return {
-                        "title": result.get("title", "未命名文档"),
-                        "toc": [],
-                        "raw_count": 0,
-                        "valid_count": 0,
-                    }
+            # 验证并清理 toc 数据
+            valid_toc = validate_toc_data(result)
+            if valid_toc:
+                return {
+                    "title": result.get("title", "未命名文档"),
+                    "toc": valid_toc,
+                    "raw_count": len(result.get("toc", [])),
+                    "valid_count": len(valid_toc),
+                }
+            elif attempt < max_retries:
+                continue
+            else:
+                return {
+                    "title": result.get("title", "未命名文档"),
+                    "toc": [],
+                    "raw_count": 0,
+                    "valid_count": 0,
+                }
 
-            except json.JSONDecodeError as e:
-                last_error = f"JSON 解析失败: {e}。响应内容: {result_text[:200] if result_text else '空'}"
+        except json.JSONDecodeError as e:
+            last_error = f"JSON 解析失败: {e}"
+            time.sleep(1)
+
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries:
                 time.sleep(2)
 
-            except Exception as e:
-                last_error = str(e)
-                if attempt < max_retries:
-                    time.sleep(3)
-
-        # 如果不是最后一批预算，说明还有机会减少页数重试；否则抛异常
-        if budget_idx < len(page_budgets) - 1:
-            print(f"⚠️ 发送 {budget} 页失败，减少页数重试...")
-            time.sleep(2)
-        else:
-            raise Exception(f"MiMo 视觉 API 调用失败（已尝试 {len(page_budgets)} 种页数方案）: {last_error}")
+    raise Exception(f"MiMo 视觉 API 调用失败（已重试 {max_retries} 次）: {last_error}")

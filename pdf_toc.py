@@ -120,7 +120,7 @@ def estimate_is_scanned(pages: list[dict], threshold: float = 0.1) -> bool:
 # ---------- 扫描件支持：PDF 页面渲染为图片 ----------
 
 
-def pdf_page_to_base64(pdf_path: str, page_index: int, max_width: int = 500) -> str:
+def pdf_page_to_base64(pdf_path: str, page_index: int, max_width: int = 800) -> str:
     """将 PDF 单页渲染为 base64 JPEG 图片"""
     doc = fitz.open(pdf_path)
     page = doc[page_index]
@@ -132,7 +132,7 @@ def pdf_page_to_base64(pdf_path: str, page_index: int, max_width: int = 500) -> 
     return base64.b64encode(img_bytes).decode("utf-8")
 
 
-def render_pdf_pages_base64(pdf_path: str, max_pages: int = 50, max_width: int = 500) -> list[dict]:
+def render_pdf_pages_base64(pdf_path: str, max_pages: int = 50, max_width: int = 800) -> list[dict]:
     """将 PDF 前 N 页逐页渲染为 base64 图片列表"""
     doc = fitz.open(pdf_path)
     total = min(len(doc), max_pages)
