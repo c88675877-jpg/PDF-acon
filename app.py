@@ -11,6 +11,7 @@ PDF 智能目录生成工具 - Gradio Web App
 """
 
 import os
+import shutil
 import tempfile
 import gradio as gr
 
@@ -34,20 +35,60 @@ _temp_dir = tempfile.mkdtemp(prefix="pdf_toc_")
 
 
 def _get_file_path(file_obj) -> str | None:
-    """兼容 Gradio 5.x 和 6.x 的文件路径提取"""
+    """
+    兼容 Gradio 5.x 和 6.x 的文件路径提取。
+    返回的路径保证文件存在；不存在则返回 None。
+    """
     if file_obj is None:
         return None
-    # 字符串直接返回
+
+    raw: str | None = None
+
+    # NamedString / 普通字符串（Gradio 5.x / 6.x 的默认行为）
     if isinstance(file_obj, str):
-        file_obj = file_obj.strip()
-        return file_obj if file_obj else None
-    # FileData 对象（Gradio 6.x）
-    if hasattr(file_obj, "path"):
-        return file_obj.path
-    # 旧版本 Gradio 的 .name
-    if hasattr(file_obj, "name"):
-        return file_obj.name
-    return None
+        raw = file_obj.strip()
+    # FileData 对象（Gradio 6.x 部分场景）
+    elif hasattr(file_obj, "path"):
+        raw = file_obj.path
+    # 旧版本 Gradio 的 .name（< 4.0）
+    elif hasattr(file_obj, "name"):
+        raw = file_obj.name
+
+    if not raw:
+        return None
+
+    # 校验路径是否存在；若不存在，尝试用 orig_name 在同目录下查找
+    if os.path.isfile(raw):
+        return raw
+
+    # 如果有 orig_name，尝试跟 _temp_dir 组合
+    orig = getattr(file_obj, "orig_name", None)
+    if orig:
+        alt = os.path.join(_temp_dir, orig)
+        if os.path.isfile(alt):
+            return alt
+
+    return None  # 找不到有效文件
+
+
+def _copy_to_stable(src_path: str) -> str:
+    """
+    将上传的临时文件复制到应用自己的临时目录，
+    避免 Gradio 在函数执行期间清理临时文件。
+    如果 src_path 已在我们自己的临时目录中，则跳过复制。
+    """
+    if src_path.startswith(_temp_dir):
+        return src_path  # 已经在稳定目录中
+    basename = os.path.basename(src_path)
+    dst = os.path.join(_temp_dir, f"upload_{basename}")
+    # 避免覆盖已有文件
+    counter = 1
+    while os.path.isfile(dst):
+        name, ext = os.path.splitext(basename)
+        dst = os.path.join(_temp_dir, f"upload_{name}_{counter}{ext}")
+        counter += 1
+    shutil.copy2(src_path, dst)
+    return dst
 
 
 def _safe_path(original_name: str) -> str:
@@ -83,13 +124,8 @@ def process_pdf(
     if not input_path:
         return None, "❌ 无法读取上传的文件，请重新选择文件"
 
-    # 检查文件是否存在
-    if not os.path.isfile(input_path):
-        return None, (
-            f"❌ 找不到上传的文件\n\n"
-            f"路径: {input_path}\n"
-            f"请重新上传文件后重试"
-        )
+    # 复制到稳定的临时目录，防止 Gradio 在函数执行期间清理临时文件
+    input_path = _copy_to_stable(input_path)
 
     try:
         # --- 获取 PDF 信息 ---
@@ -179,7 +215,10 @@ def process_pdf(
         return output_path, "\n".join(lines)
 
     except Exception as e:
-        return None, f"❌ 处理失败：{str(e)}"
+        return None, (
+            f"❌ 处理失败：{str(e)}\n\n"
+            f"📎 文件：{os.path.basename(input_path)}"
+        )
 
 
 # ---------- Gradio 界面 ----------
