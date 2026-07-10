@@ -127,7 +127,7 @@ def pdf_page_to_base64(pdf_path: str, page_index: int, max_width: int = 800) -> 
     zoom = max_width / page.rect.width
     matrix = fitz.Matrix(zoom, zoom)
     pix = page.get_pixmap(matrix=matrix)
-    img_bytes = pix.tobytes("jpeg", quality=85)
+    img_bytes = pix.tobytes("jpeg")
     doc.close()
     return base64.b64encode(img_bytes).decode("utf-8")
 
@@ -141,7 +141,7 @@ def render_pdf_pages_base64(pdf_path: str, max_pages: int = 50, max_width: int =
         zoom = max_width / doc[i].rect.width
         matrix = fitz.Matrix(zoom, zoom)
         pix = doc[i].get_pixmap(matrix=matrix)
-        img_bytes = pix.tobytes("jpeg", quality=85)
+        img_bytes = pix.tobytes("jpeg")
         b64 = base64.b64encode(img_bytes).decode("utf-8")
         pages.append({
             "page_num": i + 1,

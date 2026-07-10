@@ -264,7 +264,6 @@ def analyze_pdf_vision(
             response = client.chat.completions.create(
                 model=MIMO_VISION_MODEL,
                 messages=[{"role": "user", "content": content}],
-                response_format={"type": "json_object"},
                 temperature=0.1,
                 max_tokens=4096,
             )
