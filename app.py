@@ -155,11 +155,29 @@ def process_pdf(
 
         if is_scanned:
             progress(0.2, desc="🖼️ 检测为扫描件，使用 MiMo 视觉 AI 分析...")
-            result = analyze_pdf_vision(
-                input_path,
-                api_key,
-                max_pages=actual_pages,
-            )
+            # 视觉分析最多看前15页（目录页通常在前几页），传太多页太慢且没必要
+            vision_pages = min(actual_pages, 15)
+            try:
+                result = analyze_pdf_vision(
+                    input_path,
+                    api_key,
+                    max_pages=vision_pages,
+                )
+            except Exception as ve:
+                # 视觉分析失败时，尝试用已有文本回退分析
+                print(f"⚠️ 视觉分析失败: {ve}")
+                progress(0.3, desc="ℹ️ 视觉分析不可用，尝试文本分析...")
+                total_chars = sum(p["char_count"] for p in pages)
+                if total_chars >= 100:
+                    result = analyze_pdf_structure(pages, api_key)
+                else:
+                    return None, (
+                        "❌ 无法分析该扫描件。\n\n"
+                        "可能原因：\n"
+                        "1. MiMo 视觉 API 暂时不可用\n"
+                        "2. PDF 页面无法正常渲染\n\n"
+                        f"详细错误: {ve}"
+                    )
         else:
             total_chars = sum(p["char_count"] for p in pages)
             if total_chars < 100:

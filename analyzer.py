@@ -17,20 +17,25 @@ MIMO_TEXT_MODEL = "mimo-v2.5"
 
 # ---------- 文本分析提示词 ----------
 
-SYSTEM_PROMPT = """你是一个专业的PDF文档结构分析助手。
+SYSTEM_PROMPT = """你是一个专业的PDF文档目录提取助手。
 
-任务：分析PDF文本内容，提取完整的目录/大纲结构。
+任务：从PDF文本中提取**完整的章节目录结构**（Table of Contents）。
 
-你需要识别文档中的各级标题：
-- 一级标题：大章节标题，如"第X章"、"第X部分"、"Introduction"、"Methodology"等
-- 二级标题：节标题，如"X.X"格式、带编号的小节
-- 三级标题：子节标题，如"X.X.X"格式
+### 核心策略
+首先在文本中查找"目录"、"Contents"、"目次"等标志性内容——这些是书的目录页。
+如果找到了目录页内容，**从中提取全书完整的目录结构**（包含所有章节）。
+如果没有目录页，则从正文中提取各章节标题。
 
-判断标题的线索：
-1. 独立成行、字数较少（通常不超过30字）
-2. 有编号体系（一、二、三 / 1, 2, 3 / 1.1, 1.2 / 第一章, 第二章）
-3. 上下文：标题后紧跟正文内容
-4. 如果某行看起来像标题但不确定，宁可不提取也不要错提取"""
+### 你需要识别各级标题
+- **一级标题**：章/部分，如 "第1章" "第一章" "Chapter 1" "Part I" 等
+- **二级标题**：节标题，如 "1.1" "1.2" 等
+- **三级标题**：子节标题，如 "1.1.1" 等
+
+### 重要规则
+1. 优先找目录页（"目录"、"Contents"），从中提取**完整**的章节列表
+2. 只提取真正的章节结构，不要提取 "出版说明"、"前言"、"内容提要" 等
+3. 标题必须有明确的编号体系
+4. 宁缺毋滥"""
 
 
 def build_user_prompt(pages_text: list[dict]) -> str:
@@ -45,19 +50,25 @@ def build_user_prompt(pages_text: list[dict]) -> str:
 
     combined = "\n\n".join(text_blocks)
 
-    return f"""请分析以下PDF每页的文本内容，提取文档的目录结构。
+    return f"""请分析以下PDF每页的文本内容，提取文档的**完整章节目录**。
 
 文本内容（每页以 --- Page N --- 标记）：
 {combined}
 
 请严格输出以下JSON格式，不要包含其他内容：
-{{"title": "文档标题（根内容推测）", "toc": [{{"level": 1, "title": "章节标题", "page": N}}]}}
+{{"title": "文档标题", "toc": [{{"level": 1, "title": "章节标题", "page": N}}]}}
 
-要求：
-- level 从 1 开始，1=最高级（章），2=节，3=子节
-- page 必须对应 --- Page N --- 中的 N（PDF实际页码，从1开始）
-- 标题文本保持原文，不要添加额外编号
-- 如果文档没有清晰章节结构，toc 返回空数组 []"""
+### 核心策略
+先在文本中查找"目录"、"Contents"段落——这是书的目录页。
+**如果找到了目录内容，从中提取完整的全书章节列表（包括所有章节）。**
+如果找不到目录页，再从正文中提取章节标题。
+
+### 要求（非常重要）：
+- level: 1=章/部分, 2=节, 3=子节
+- page: 对应 --- Page N --- 中的N
+- 章节标题必须有编号（如"第1章""1.1""一、""Chapter 2"等）
+- 不要包含 "出版说明"、"前言"、"内容提要" 等非章节内容
+- 如果文档没有清晰的章节结构，toc 返回空数组 []"""
 
 
 def validate_toc_data(data: dict) -> list[dict]:
@@ -186,46 +197,63 @@ def create_fallback_toc(pages_text: list[dict]) -> dict:
 
 # ---------- 扫描件支持：视觉分析 ----------
 
-VISION_PROMPT = """你是一个专业的PDF文档结构分析助手。
+import re
 
-我会依次发送PDF每一页的截图图片（按页码顺序排列，每张图片前标注了页码）。
-请仔细观察这些图片，识别文档的目录/章节结构。
 
-你需要识别文档中的各级标题：
-- 一级标题：大章节标题（章、部分）
-- 二级标题：节标题（节、小节）
-- 三级标题：子节标题
+def _extract_json(text: str) -> dict:
+    """从 API 返回文本中健壮地提取 JSON，兼容各种包装格式"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
 
-判断标题的线索：
-1. 字号明显大于正文、字体加粗
-2. 有编号体系（一、二、三 / 1, 2, 3 / 1.1, 1.2 / 第一章, 第二章）
-3. 独立成行，前后有空白间距
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
 
-请严格输出以下JSON格式，不要包含其他内容：
-{"title": "文档标题（从封面或第一页推断）", "toc": [{"level": 1, "title": "章节标题", "page": N}]}
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
 
-要求：
-- level 从1开始，1=最高级（章），2=节，3=子节
-- page 必须填写图片对应的页码（第几张图片就是第几页）
-- 标题文本保持原文，不要修改
-- 如果文档没有清晰章节结构，toc 返回空数组[]
-- 注意封面页可能没有目录内容，从正文部分开始分析"""
+    raise json.JSONDecodeError(f"无法从响应中提取 JSON。响应内容（前 300 字符）: {text[:300]}", text, 0)
+
+
+VISION_PROMPT = """你只做一件事：从PDF截图中提取章节目录，只输出JSON。
+
+我会依次发送PDF每一页的截图图片（按页码顺序）。
+
+规则：
+1. 优先找"目录"、"Contents"页，从中提取**全书完整**章节列表
+2. 找不到目录页就从正文中提取章节标题
+3. 只提取有编号的章节标题（"第1章""1.1""一、"等）
+4. 忽略封面、出版说明、前言等非章节内容
+
+⚠️ 输出格式要求：**只输出JSON，不要有任何其他文字、不要解释、不要分析过程**
+
+{"title": "文档标题", "toc": [{"level": 1, "title": "第1章 xxx", "page": 3}]}"""
 
 
 def analyze_pdf_vision(
     pdf_path: str,
     api_key: str,
-    max_pages: int = 10,
-    max_retries: int = 3,
+    max_pages: int = 15,
+    max_retries: int = 2,
 ) -> dict:
     """
     使用 MiMo 视觉 API 分析扫描件 PDF 结构，提取目录。
+    如果发送页数过多导致失败，自动减少页数重试。
 
     参数:
         pdf_path: PDF 文件路径
         api_key: MiMo API Key
         max_pages: 最多分析页数
-        max_retries: 重试次数
+        max_retries: 每批次的 API 重试次数
 
     返回:
         {"title": str, "toc": [{"level": int, "title": str, "page": int}, ...]}
@@ -240,70 +268,94 @@ def analyze_pdf_vision(
         base_url=MIMO_BASE_URL,
     )
 
-    # 渐进式页数：如果一次请求失败，逐步减少页数重试
-    page_budgets = [max_pages, 8, 5]
+    # 渐进式页数：先试目标页数，失败后减少
+    page_budgets = [max_pages, 6]
 
     for budget_idx, budget in enumerate(page_budgets):
-        # 将 PDF 页面渲染为 base64 图片（低分辨率加快速度）
-        pages = render_pdf_pages_base64(pdf_path, max_pages=budget, max_width=400)
+        # 渲染 PDF 页面为低分辨率图片（减小请求体积）
+        pages = render_pdf_pages_base64(pdf_path, max_pages=budget, max_width=300)
 
-    if not pages:
-        raise ValueError("无法读取 PDF 页面")
+        if not pages:
+            raise ValueError("无法读取 PDF 页面")
 
-    # 构建消息：文本指令 + 每页图片
-    content = [{"type": "text", "text": VISION_PROMPT}]
-    for p in pages:
-        content.append({"type": "text", "text": f"\n--- Page {p['page_num']} ---"})
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{p['image_base64']}",
-                "detail": "low",
-            },
-        })
+        # 构建消息：文本指令 + 每页图片
+        content = [{"type": "text", "text": VISION_PROMPT}]
+        for p in pages:
+            content.append({"type": "text", "text": f"\n--- Page {p['page_num']} ---"})
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{p['image_base64']}",
+                },
+            })
 
-    last_error = None
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.chat.completions.create(
-                model=MIMO_VISION_MODEL,
-                messages=[{"role": "user", "content": content}],
-                temperature=0.1,
-                max_tokens=4096,
-            )
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=MIMO_VISION_MODEL,
+                    messages=[{"role": "user", "content": content}],
+                    temperature=0.1,
+                    max_tokens=8192,
+                    stream=False,
+                )
 
-            result_text = response.choices[0].message.content
-            if not result_text:
-                raise ValueError("API 返回内容为空")
+                # 调试：检查响应结构
+                result_text = response.choices[0].message.content
+                finish_reason = response.choices[0].finish_reason
 
-            result = json.loads(result_text)
+                if result_text is None:
+                    print(f"⚠️ MiMo 返回空内容，finish_reason={finish_reason}")
+                    print(f"⚠️ 完整响应: {response}")
+                    raise ValueError(f"API 返回空内容 (finish_reason={finish_reason})")
 
-            # 验证并清理 toc 数据
-            valid_toc = validate_toc_data(result)
-            if valid_toc:
-                return {
-                    "title": result.get("title", "未命名文档"),
-                    "toc": valid_toc,
-                    "raw_count": len(result.get("toc", [])),
-                    "valid_count": len(valid_toc),
-                }
-            elif attempt < max_retries:
-                continue
-            else:
-                return {
-                    "title": result.get("title", "未命名文档"),
-                    "toc": [],
-                    "raw_count": 0,
-                    "valid_count": 0,
-                }
+                if not result_text.strip():
+                    raise ValueError("API 返回空字符串")
 
-        except json.JSONDecodeError as e:
-            last_error = f"JSON 解析失败: {e}"
+                # 尝试解析 JSON（兼容各种包装格式）
+                try:
+                    result = _extract_json(result_text)
+                except json.JSONDecodeError:
+                    raise ValueError(
+                        f"模型未返回 JSON，返回了自然语言文本。"
+                        f"响应预览: {result_text[:200]}..."
+                    )
+
+                # 验证并清理 toc 数据
+                valid_toc = validate_toc_data(result)
+                if valid_toc:
+                    return {
+                        "title": result.get("title", "未命名文档"),
+                        "toc": valid_toc,
+                        "raw_count": len(result.get("toc", [])),
+                        "valid_count": len(valid_toc),
+                    }
+                elif attempt < max_retries:
+                    continue
+                else:
+                    return {
+                        "title": result.get("title", "未命名文档"),
+                        "toc": [],
+                        "raw_count": 0,
+                        "valid_count": 0,
+                    }
+
+            except ValueError as e:
+                # 模型返回了非 JSON 文本，重试也没用，直接跳到下一种页数方案
+                last_error = str(e)
+                break  # 跳出 retry 循环，进入下一个页数预算
+
+            except Exception as e:
+                last_error = str(e)
+                # 打印更详细的错误
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"⚠️ API 错误: status={e.response.status_code}, body={e.response.text[:300]}")
+                if attempt < max_retries:
+                    print(f"⏳ 重试第 {attempt+2} 次...")
+                    time.sleep(3)
+
+        if budget_idx < len(page_budgets) - 1:
+            print(f"⚠️ 发送 {budget} 页失败，减少到 {page_budgets[budget_idx+1]} 页重试...")
             time.sleep(1)
 
-        except Exception as e:
-            last_error = str(e)
-            if attempt < max_retries:
-                time.sleep(2)
-
-    raise Exception(f"MiMo 视觉 API 调用失败（已重试 {max_retries} 次）: {last_error}")
+    raise Exception(f"MiMo 视觉 API 调用失败（已尝试 {len(page_budgets)} 种页数方案, 每方案重试 {max_retries+1} 次）: {last_error}")
