@@ -268,8 +268,11 @@ def analyze_pdf_vision(
         base_url=MIMO_BASE_URL,
     )
 
-    # 渐进式页数：先试目标页数，失败后减少
-    page_budgets = [max_pages, 6]
+    # 渐进式页数：先试目标页数，失败后减少。去重避免小页数重复请求。
+    page_budgets = []
+    for budget in (max_pages, min(max_pages, 6)):
+        if budget > 0 and budget not in page_budgets:
+            page_budgets.append(budget)
 
     for budget_idx, budget in enumerate(page_budgets):
         # 渲染 PDF 页面为低分辨率图片（减小请求体积）
